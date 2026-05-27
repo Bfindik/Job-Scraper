@@ -16,7 +16,7 @@
 
 ## ✨ Why JobsTracker?
 
-Most LinkedIn scraping tools either **cost money** or **flood you with 5+ year roles** when you're fresh out of college. JobsTracker is built specifically for **new grads**:
+I built JobsTracker during my own job search as a new grad — it scrapes LinkedIn, filters out senior roles, and syncs new listings to Notion so I can focus on roles that actually match my level.
 
 - 🔍 **Two-stage filtering** — title prefix check (`Senior`, `Lead`...) + description scan (`3+ years`, `5 years experience`...)
 - 💾 **SQLite storage** — zero duplicates across runs, persistent state, applied/favorite tracking

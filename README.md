@@ -1,6 +1,6 @@
 <div align="left">
 
-# 📋 JobsTracker
+# 📋 JobTracker
 
 ### Free LinkedIn job scraper for new grads — filters out senior roles, syncs to Notion
 
@@ -14,9 +14,9 @@
 
 ---
 
-## ✨ Why JobsTracker?
+## ✨ Why JobTracker?
 
-I built JobsTracker during my own job search as a new grad — it scrapes LinkedIn, filters out senior roles, and syncs new listings to Notion so I can focus on roles that actually match my level.
+I built JobTracker during my own job search as a new grad — it scrapes LinkedIn, filters out senior roles, and syncs new listings to Notion so I can focus on roles that actually match my level.
 
 - 🔍 **Two-stage filtering** — title prefix check (`Senior`, `Lead`...) + description scan (`3+ years`, `5 years experience`...)
 - 💾 **SQLite storage** — zero duplicates across runs, persistent state, applied/favorite tracking
@@ -31,8 +31,8 @@ I built JobsTracker during my own job search as a new grad — it scrapes Linked
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/<your-username>/jobs-tracker.git
-cd jobs-tracker
+git clone https://github.com/<your-username>/job-tracker.git
+cd job-tracker
 pip install -r requirements.txt
 
 # 2. (Optional) Set up Notion sync
@@ -128,7 +128,7 @@ Auto-sync every scraped job into a Notion database for visual tracking.
 ### 1. Create a Notion integration
 
 1. Go to [notion.so/my-integrations](https://www.notion.so/my-integrations)
-2. **New integration** → name it `jobs-tracker`
+2. **New integration** → name it `job-tracker`
 3. Copy the **Internal Integration Token** (starts with `ntn_` or `secret_`)
 
 ### 2. Import the CSV template
@@ -145,7 +145,7 @@ Auto-sync every scraped job into a Notion database for visual tracking.
 ### 3. Connect integration to the database
 
 1. Open the database, click `···` (top-right) → **Connections**
-2. Add `jobs-tracker`
+2. Add `job-tracker`
 
 ### 4. Configure & run
 

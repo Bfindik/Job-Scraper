@@ -203,7 +203,7 @@ Two-stage approach — cheap check first, expensive check only when needed:
 
 **Stage 1 — Title check (no extra request):**
 ```python
-if title.startswith(("senior", "lead", "principal", ...)):
+if title.__contains__(("senior", "lead", "principal", ...)):
     skip()
 ```
 

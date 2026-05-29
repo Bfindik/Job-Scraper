@@ -1,0 +1,20 @@
+# Secrets
+.env
+
+# Your resume (used for CV match scoring)
+cv.pdf
+
+# Generated data
+jobs.db
+jobs_export.csv
+scraper.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor
+.vscode/
+.idea/

@@ -20,6 +20,13 @@ import os
 from datetime import datetime
 import requests
 
+# Load NOTION_TOKEN / NOTION_DB_ID from a .env file if present.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except ImportError:
+    pass
+
 
 log = logging.getLogger(__name__)
 
@@ -39,31 +46,31 @@ def notion_headers():
     }
  
  
-def get_existing_notion_ids() -> set:
-    """Fetch all Job IDs already in Notion (handles pagination)."""
-    existing = set()
+def get_existing_pages() -> dict:
+    """Map of Job ID -> Notion page_id for pages already in the DB (paginated)."""
+    existing = {}
     url      = f"https://api.notion.com/v1/databases/{DATABASE_ID}/query"
     payload  = {"page_size": 100}
- 
+
     while True:
         resp = requests.post(url, headers=notion_headers(), json=payload, timeout=15)
         if resp.status_code != 200:
             log.error(f"Notion query failed {resp.status_code}: {resp.text[:300]}")
             return existing
         data = resp.json()
- 
+
         for page in data.get("results", []):
             props   = page.get("properties", {})
             id_prop = props.get("Job ID", {})
             # Job ID is a number property now
             num = id_prop.get("number")
             if num is not None:
-                existing.add(str(num))
- 
+                existing[str(num)] = page["id"]
+
         if not data.get("has_more"):
             break
         payload["start_cursor"] = data["next_cursor"]
- 
+
     return existing
  
  
@@ -90,6 +97,7 @@ def job_to_notion_page(job: dict) -> dict:
         "Job ID":   job_id_value,
         "Notes":    {"rich_text": rich(job.get("notes") or "")},
         "Favorite": {"checkbox": bool(job.get("is_favorite", 0))},
+        "Match Score": {"number": round(float(job.get("match_score") or 0), 1)},
     }
  
     if job.get("job_url"):
@@ -122,6 +130,19 @@ def push_job(job: dict) -> bool:
         log.error(f"  Notion API {resp.status_code}: {resp.text[:300]}")
         return False
     return True
+
+
+def update_match_score(page_id: str, job: dict) -> bool:
+    """Patch only the Match Score on an existing page (won't touch your edits)."""
+    url     = f"https://api.notion.com/v1/pages/{page_id}"
+    payload = {"properties": {
+        "Match Score": {"number": round(float(job.get("match_score") or 0), 1)},
+    }}
+    resp = requests.patch(url, headers=notion_headers(), json=payload, timeout=15)
+    if resp.status_code != 200:
+        log.error(f"  Notion update {resp.status_code}: {resp.text[:300]}")
+        return False
+    return True
  
  
 def sync(dry_run: bool = False):
@@ -129,7 +150,7 @@ def sync(dry_run: bool = False):
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     jobs = [dict(r) for r in conn.execute(
-        "SELECT * FROM jobs ORDER BY scraped_at DESC"
+        "SELECT * FROM jobs ORDER BY match_score DESC, scraped_at DESC"
     ).fetchall()]
     conn.close()
  
@@ -138,26 +159,36 @@ def sync(dry_run: bool = False):
         return
  
     log.info("[Notion] Checking existing pages in Notion...")
-    existing_ids = get_existing_notion_ids()
-    log.info(f"[Notion] {len(existing_ids)} already synced | {len(jobs)} total in DB")
- 
-    new_jobs = [j for j in jobs if j["job_id"] not in existing_ids]
-    log.info(f"[Notion] {len(new_jobs)} new jobs to push")
- 
-    pushed = 0
-    errors = 0
- 
+    existing = get_existing_pages()
+    log.info(f"[Notion] {len(existing)} already in Notion | {len(jobs)} total in DB")
+
+    new_jobs = [j for j in jobs if j["job_id"] not in existing]
+    # Update scores on pages already in Notion (only those that have a score).
+    upd_jobs = [j for j in jobs
+                if j["job_id"] in existing and j.get("match_score") is not None]
+    log.info(f"[Notion] {len(new_jobs)} new to create | {len(upd_jobs)} to update scores")
+
+    pushed = updated = errors = 0
+
     for job in new_jobs:
         if dry_run:
-            log.info(f"  [DRY RUN] Would push: {job['title']} @ {job['company']}")
+            log.info(f"  [DRY RUN] Would create: {job['title']} @ {job['company']}")
             continue
         if push_job(job):
             pushed += 1
-            log.info(f"  ✓ {job['title']} @ {job['company']}")
+            log.info(f"  created: {job['title']} @ {job['company']}")
         else:
             errors += 1
- 
-    log.info(f"[Notion] Done — pushed {pushed}, errors {errors}")
+
+    for job in upd_jobs:
+        if dry_run:
+            continue
+        if update_match_score(existing[job["job_id"]], job):
+            updated += 1
+        else:
+            errors += 1
+
+    log.info(f"[Notion] Done — created {pushed}, scores updated {updated}, errors {errors}")
  
  
 if __name__ == "__main__":

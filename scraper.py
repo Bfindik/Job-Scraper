@@ -100,10 +100,23 @@ class Database:
                 method      TEXT
             )
         """)
+        # Jobs you deleted in Notion — never scrape/re-add these again.
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS ignored_jobs (
+                job_id     TEXT PRIMARY KEY,
+                title      TEXT,
+                company    TEXT,
+                ignored_at TEXT
+            )
+        """)
         self.conn.commit()
 
     def job_exists(self, job_id: str) -> bool:
         cur = self.conn.execute("SELECT 1 FROM jobs WHERE job_id=?", (job_id,))
+        return cur.fetchone() is not None
+
+    def is_ignored(self, job_id: str) -> bool:
+        cur = self.conn.execute("SELECT 1 FROM ignored_jobs WHERE job_id=?", (job_id,))
         return cur.fetchone() is not None
 
     def insert_job(self, job: Job) -> bool:
@@ -135,7 +148,7 @@ class Database:
             writer = csv.writer(f)
             writer.writerow(cols)
             writer.writerows(rows)
-        log.info(f"Exported {len(rows)} jobs → {filepath}")
+        log.info(f"Exported {len(rows)} jobs -> {filepath}")
         return filepath
 
     def get_stats(self):
@@ -369,6 +382,10 @@ class LinkedInJobScraper:
             filter_enabled  = CONFIG.get("filter_senior_jobs", True)
 
             for job in jobs:
+                # Stage 0: skip jobs you already rejected in Notion (no extra request)
+                if self.db.is_ignored(job.job_id):
+                    continue
+
                 # Stage 1: cheap title check (no extra request)
                 if filter_enabled and is_senior_by_title(job):
                     filtered_title += 1
@@ -408,16 +425,34 @@ class LinkedInJobScraper:
         # Auto-export CSV after each run
         self.db.export_csv("jobs_export.csv")
 
-        # Sync to Notion if configured
-        try:
-            from notion_sync import sync, NOTION_TOKEN
-            if not NOTION_TOKEN.startswith("secret_xxx") and not NOTION_TOKEN.startswith("ntn_xxx"):
-                log.info("Syncing new jobs to Notion...")
+        def notion_sync():
+            """Push new jobs + update scores. Isolated so a failure never
+            stops the rest of the run."""
+            try:
+                from notion_sync import sync, NOTION_TOKEN
+                if NOTION_TOKEN.startswith("secret_xxx") or NOTION_TOKEN.startswith("ntn_xxx"):
+                    log.info("Notion sync skipped — token not configured (set NOTION_TOKEN in .env)")
+                    return
                 sync()
-            else:
-                log.info("Notion sync skipped — token not configured (notion_sync.py)")
+            except Exception as e:
+                log.warning(f"Notion sync failed: {e}")
+
+        # 1) Push new jobs to Notion FIRST, so they appear even if the (slower,
+        #    rate-limited) AI scoring step is interrupted or fails.
+        log.info("Syncing new jobs to Notion...")
+        notion_sync()
+
+        # 2) Score the newly scraped jobs with AI (Gemini).
+        try:
+            import score
+            log.info("Scoring new jobs with AI...")
+            score.run()  # new jobs only; no-ops if GEMINI_API_KEY isn't set
         except Exception as e:
-            log.warning(f"Notion sync failed: {e}")
+            log.warning(f"AI scoring failed: {e}")
+
+        # 3) Sync again to write the fresh match scores onto the Notion pages.
+        log.info("Updating Notion with match scores...")
+        notion_sync()
 
 if __name__ == "__main__":
     LinkedInJobScraper().run()

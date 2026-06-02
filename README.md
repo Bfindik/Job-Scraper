@@ -19,9 +19,10 @@
 
 I built JobTracker during my own job search as a new grad — it scrapes LinkedIn, filters out senior roles, scores how well each job fits *me* with AI, and syncs new listings to Notion so I can focus on roles that actually match my level.
 
-- 🔍 **Two-stage filtering** — title prefix check (`Senior`, `Lead`...) + description scan (`3+ years`...)
+- 🔍 **Two-stage filtering** — title prefix check (`Senior`, `Lead`...) + description scan with auto-generated `N+ years` phrases (3–10 yrs, EN + TR)
 - 🤖 **AI match scoring** — Gemini reads your resume (`cv.pdf`) + each job and rates fit, so best matches surface first
 - 💾 **SQLite storage** — zero duplicates, persistent state, applied/favorite tracking
+- 🧹 **Auto-prune** — jobs older than `retention_days` (default 30) are deleted from the DB *and* Notion on each run, so the board stays current (applied jobs are kept)
 - 📋 **Notion two-way sync** — pushes new jobs in; jobs you delete in Notion get pruned from the DB (and never come back)
 - 🛡️ **Resilient** — Guest API primary + Playwright fallback, rotating user-agents, randomized delays
 - ⚡ **Zero cost** — no API keys to scrape; Notion and Gemini both run on free tiers
@@ -57,7 +58,12 @@ CONFIG = {
     ],
     "filter_senior_jobs": True,
     "blocked_title_prefixes": ["senior", "lead", "principal", "staff", "manager", "architect"],
-    "blocked_description_phrases": ["3+ years", "5+ years", "at least 5 years"],
+    # Auto-generated for 3–10 years (EN + TR): "3+ years", "minimum 5 years",
+    # "5 yıl", "3-5 years"... Change the span in _experience_phrases(min, max).
+    "blocked_description_phrases": _experience_phrases(3, 10) + [
+        # add any custom one-off phrases here
+    ],
+    "retention_days": 30,       # delete jobs older than this on each run (0 = off)
     "schedule_time": "09:00",   # daily run time
     "min_delay": 2, "max_delay": 5,
     "match_scoring": {          # AI scoring — weights must sum to 1.0
@@ -82,6 +88,8 @@ python score.py --dry-run  # print scores, write nothing
 ```
 
 > Free Gemini tier needs no credit card (~250 req/day on `gemini-2.5-flash`). Get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey), add it to `.env` as `GEMINI_API_KEY`. The scoring rubric in `config.py` is *your* prompt — edit freely.
+>
+> **Hit the daily quota?** On a `429` the scorer stops sending requests immediately (no retry loop) and exits cleanly — already-scored jobs are saved, and the rest of the run continues. Transient `500`/`503` overloads still retry with backoff.
 
 ---
 
@@ -135,9 +143,9 @@ Cheap checks first, expensive checks only when needed:
 
 1. **Notion blocklist** *(no request)* — skip any job you already rejected in Notion.
 2. **Title check** *(no extra request)* — skip titles starting with `senior`, `lead`, `principal`...
-3. **Description check** *(1 request per job that passed)* — skip if it hits `3+ years`, `minimum 5 years`...
+3. **Description check** *(1 request per job that passed)* — skip if it hits any auto-generated experience phrase (`3+ years`, `minimum 5 years`, `5 yıl`...).
 
-This minimizes requests so you don't hit LinkedIn's rate limits while still catching senior roles hidden in the description.
+This minimizes requests so you don't hit LinkedIn's rate limits while still catching senior roles hidden in the description. The phrase list is built by `_experience_phrases(3, 10)` in `config.py`, covering 3–10 years in English and Turkish — widen the range there instead of hand-listing each phrase.
 
 ---
 
@@ -145,7 +153,8 @@ This minimizes requests so you don't hit LinkedIn's rate limits while still catc
 
 - **Getting blocked?** Raise `min_delay` / `max_delay` to 5/10.
 - **Fewer requests?** Set `blocked_description_phrases: []` — only the title filter runs.
-- **AI hitting limits?** Free Gemini is ~10 req/min — bump `request_delay_seconds` or use `gemini-2.5-flash-lite` (~1000/day).
+- **AI hitting limits?** Free Gemini is ~10 req/min — bump `request_delay_seconds` or use `gemini-2.5-flash-lite` (~1000/day). On a daily-quota `429` the scorer stops cleanly instead of retrying.
+- **Keep more history?** Raise `retention_days` (or set `0` to never auto-delete). Applied jobs are always kept regardless.
 - **Cron it:** runs daily at `schedule_time`, or add `python scraper.py` to cron / Task Scheduler.
 - **Schema changes?** Delete `jobs.db` (or `python jobs_cli.py reset`) and re-run.
 

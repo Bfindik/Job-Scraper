@@ -82,6 +82,17 @@ def job_to_notion_page(job: dict) -> dict:
  
     status = "Applied" if job.get("is_applied") else \
              "Saved"   if job.get("is_saved")   else "New"
+
+    # Notion multi_select options can't contain commas, so split a location
+    # like "Ankara, Ankara, Türkiye" into separate options (deduped, in order).
+    location_opts, seen = [], set()
+    for part in (job.get("location") or "Unknown").split(","):
+        part = part.strip()[:100]
+        if part and part.lower() not in seen:
+            seen.add(part.lower())
+            location_opts.append({"name": part})
+    if not location_opts:
+        location_opts = [{"name": "Unknown"}]
  
     # Job ID as number (LinkedIn IDs are numeric)
     try:
@@ -92,7 +103,7 @@ def job_to_notion_page(job: dict) -> dict:
     props = {
         "Name":     {"title": rich(job["title"])},
         "Company":  {"rich_text": rich(job["company"])},
-        "Location": {"multi_select": [{"name": (job["location"] or "Unknown")[:100]}]},
+        "Location": {"multi_select": location_opts},
         "Status":   {"status": {"name": status}},
         "Job ID":   job_id_value,
         "Notes":    {"rich_text": rich(job.get("notes") or "")},

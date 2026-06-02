@@ -145,6 +145,31 @@ def update_match_score(page_id: str, job: dict) -> bool:
     return True
  
  
+def archive_page(page_id: str) -> bool:
+    """Move a single Notion page to trash (Notion's form of delete)."""
+    url     = f"https://api.notion.com/v1/pages/{page_id}"
+    payload = {"archived": True}
+    resp    = requests.patch(url, headers=notion_headers(), json=payload, timeout=15)
+    if resp.status_code != 200:
+        log.error(f"  Notion archive {resp.status_code}: {resp.text[:300]}")
+        return False
+    return True
+
+
+def archive_jobs(job_ids) -> int:
+    """Archive (delete) the Notion pages matching these job_ids. Returns count archived."""
+    wanted = {str(j) for j in job_ids}
+    if not wanted:
+        return 0
+    existing = get_existing_pages()
+    archived = 0
+    for jid in wanted:
+        page_id = existing.get(jid)
+        if page_id and archive_page(page_id):
+            archived += 1
+    return archived
+
+
 def sync(dry_run: bool = False):
     """Push all new jobs from SQLite → Notion. Skips already-synced jobs."""
     conn = sqlite3.connect(DB_PATH)

@@ -53,6 +53,12 @@ CONFIG = {
     # ── Defaults ──────────────────────────────────────────────────────
     "default_max_jobs": 50,
 
+    # ── Retention ─────────────────────────────────────────────────────
+    # At the start of each run, delete jobs scraped more than this many days
+    # ago so the database stays current. Applied jobs (is_applied=1) are kept.
+    # Set to 0 to disable cleanup.
+    "retention_days": 30,
+
     # ── AI match scoring (score.py) ───────────────────────────────────
     # Each job's description is sent to Google Gemini together with your
     # resume (cv.pdf). The model scores 3 dimensions 0-100; the final

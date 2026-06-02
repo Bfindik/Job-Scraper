@@ -105,11 +105,22 @@ def job_text(job: dict) -> str:
     )
 
 
-def is_retryable(err: Exception) -> bool:
-    """Transient errors worth waiting out: rate limits (429) and overload (503/500)."""
+class RateLimited(Exception):
+    """Raised when the API returns 429 — quota/rate limit hit, so we stop entirely."""
+
+
+def is_rate_limited(err: Exception) -> bool:
+    """A 429 / quota error: retrying won't help, so stop sending requests."""
     msg = str(err).lower()
     return any(s in msg for s in (
-        "429", "resource_exhausted", "quota", "rate",      # rate limits
+        "429", "resource_exhausted", "quota", "rate",
+    ))
+
+
+def is_retryable(err: Exception) -> bool:
+    """Transient overload (503/500) worth waiting out — unlike a 429, this can recover."""
+    msg = str(err).lower()
+    return any(s in msg for s in (
         "503", "unavailable", "overloaded", "high demand",  # temporary overload
         "500", "internal",                                  # transient server errors
     ))
@@ -138,6 +149,9 @@ def score_job(client, system: str, resume_pdf: bytes, job: dict) -> MatchResult:
             # Fallback: parse the raw JSON text ourselves.
             return MatchResult.model_validate_json(resp.text)
         except Exception as e:
+            if is_rate_limited(e):
+                # 429 means the quota is spent — retrying just burns more 429s.
+                raise RateLimited(str(e)) from e
             if is_retryable(e) and attempt < attempts - 1:
                 log.warning(f"    temporary error ({str(e)[:60]}…) — "
                             f"waiting 25s and retrying ({attempt+1}/{attempts-1})…")
@@ -207,6 +221,10 @@ def run(rescore_all: bool = False, dry_run: bool = False, limit: int = 0):
                 conn.commit()
                 log.info(f"  scored {final:5.1f}  {job['title']} @ {job['company']}")
             scored += 1
+        except RateLimited as e:
+            log.warning(f"[Score] Rate limited (429) — stopping. "
+                        f"Scored {scored} job(s) before the limit. ({str(e)[:60]}…)")
+            break
         except Exception as e:
             errors += 1
             log.error(f"  ERROR {job.get('title','?')} @ {job.get('company','?')}: {e}")

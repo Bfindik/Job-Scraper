@@ -133,6 +133,25 @@ class Database:
         self.conn.commit()
         return True
 
+    def delete_old_jobs(self, days: int) -> list:
+        """Delete jobs scraped more than `days` ago so the DB stays current.
+        Applied jobs are kept. Returns the list of deleted job_ids (so their
+        Notion pages can be archived too)."""
+        if not days or days <= 0:
+            return []
+        where = (
+            "scraped_at IS NOT NULL AND TRIM(scraped_at) != '' "
+            "AND scraped_at < datetime('now', ?) "
+            "AND is_applied = 0"
+        )
+        arg = (f"-{int(days)} days",)
+        ids = [r[0] for r in
+               self.conn.execute(f"SELECT job_id FROM jobs WHERE {where}", arg)]
+        if ids:
+            self.conn.execute(f"DELETE FROM jobs WHERE {where}", arg)
+            self.conn.commit()
+        return ids
+
     def log_run(self, jobs_found: int, jobs_new: int, method: str):
         self.conn.execute(
             "INSERT INTO scrape_runs (run_at, jobs_found, jobs_new, method) VALUES (?,?,?,?)",
@@ -357,6 +376,22 @@ class LinkedInJobScraper:
         log.info("=" * 60)
         log.info(f"Starting scrape run — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
         log.info("=" * 60)
+
+        # Drop stale jobs first so the database stays current.
+        retention_days = CONFIG.get("retention_days", 30)
+        removed_ids = self.db.delete_old_jobs(retention_days)
+        if removed_ids:
+            log.info(f"Removed {len(removed_ids)} job(s) older than {retention_days} days")
+            # Also delete their pages from Notion so the board stays in sync.
+            try:
+                from notion_sync import archive_jobs, NOTION_TOKEN
+                if NOTION_TOKEN.startswith("secret_xxx") or NOTION_TOKEN.startswith("ntn_xxx"):
+                    log.info("Notion cleanup skipped — token not configured")
+                else:
+                    n = archive_jobs(removed_ids)
+                    log.info(f"Archived {n} stale page(s) in Notion")
+            except Exception as e:
+                log.warning(f"Notion cleanup failed: {e}")
 
         total_found = 0
         total_new   = 0
